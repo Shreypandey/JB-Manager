@@ -1,7 +1,8 @@
 from enum import Enum
 from typing import Optional, List, Dict
 from pydantic import BaseModel, model_validator
-from lib.data_models.message import Message
+from lib.data_models.message import Message, MessageType
+from lib.data_models.retriever import RAGResponse
 
 
 class FlowIntent(Enum):
@@ -45,30 +46,56 @@ class UserInput(BaseModel):
     message: Message
 
 
+class CallbackType(Enum):
+    EXTERNAL = "external"
+    RAG = "rag"
+
 class Callback(BaseModel):
     turn_id: str
-    callback_input: str
+    callback_type: CallbackType
+    external: Optional[str] = None
+    rag_response: Optional[List[RAGResponse]] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def validate_data(cls, values: Dict):
+        """Validates data field"""
+        callback_type = values.get("callback_type")
+        external = values.get("external")
+        rag_response = values.get("rag_response")
 
-class DialogOption(Enum):
-    CONVERSATION_RESET = "CONVERSATION_RESET"
-    LANGUAGE_CHANGE = "LANGUAGE_CHANGE"
-    LANGUAGE_SELECTED = "LANGUAGE_SELECTED"
+        if callback_type == CallbackType.EXTERNAL and external is None:
+            raise ValueError("external cannot be None for CallbackType: EXTERNAL")
+        elif callback_type == CallbackType.RAG and rag_response is None:
+            raise ValueError("rag_response cannot be None for CallbackType: RAG")
+        return values
 
 
 class Dialog(BaseModel):
     turn_id: str
-    dialog_id: DialogOption
-    dialog_input: Optional[str]
+    message: Message
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_data(cls, values: Dict):
+        """Validates data field"""
+        message = values.get("message")
+
+        if isinstance(message, Dict):
+            message = Message(**message)
+
+        if message.message_type != MessageType.DIALOG:
+            raise ValueError("Only dialog message type is allowed for dialog intent")
+        return values
 
 
-class FlowInput(BaseModel):
+class Flow(BaseModel):
     source: str
     intent: FlowIntent
     bot_config: Optional[BotConfig] = None
     dialog: Optional[Dialog] = None
     callback: Optional[Callback] = None
-    user_input: Optional[Message] = None
+    user_input: Optional[UserInput] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -95,11 +122,18 @@ class FSMIntent(Enum):
     CONVERSATION_RESET = "CONVERSATION_RESET"
     LANGUAGE_CHANGE = "LANGUAGE_CHANGE"
     SEND_MESSAGE = "SEND_MESSAGE"
+    RAG_CALL = "RAG_CALL"
 
+
+class RAGQuery(BaseModel):
+    collection_name: str
+    query: str
+    top_chunk_k_value: int
 
 class FSMOutput(BaseModel):
     intent: FSMIntent
     message: Optional[Message] = None
+    rag_query: Optional[RAGQuery] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -107,9 +141,12 @@ class FSMOutput(BaseModel):
         """Validates data field"""
         intent = values.get("intent")
         message = values.get("message")
+        rag_query = values.get("rag_query")
 
         if intent == FSMIntent.SEND_MESSAGE and message is None:
             raise ValueError(f"message cannot be None for intent: {intent.name}")
+        elif intent == FSMIntent.RAG_CALL and rag_query is None:
+            raise ValueError(f"rag_query cannot be None for intent: {intent.name}")
         return values
 
 
@@ -121,12 +158,12 @@ class FSMInput(BaseModel):
     @classmethod
     def validate_data(cls, values: Dict):
         """Validates data field"""
-        if values.get("user_input") is None and values.get("callback_input") is None:
+        user_input = values.get("user_input")
+        callback_input = values.get("callback_input")
+        if user_input is None and callback_input is None:
             raise ValueError("user_input or callback_input is required")
-        elif (
-            values.get("user_input") is not None
-            and values.get("callback_input") is not None
-        ):
+        elif user_input is not None and callback_input is not None:
             raise ValueError(
                 "user_input and callback_input cannot be provided together"
             )
+        return values

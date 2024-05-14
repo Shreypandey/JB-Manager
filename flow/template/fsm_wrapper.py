@@ -3,7 +3,8 @@ import os
 import json
 from cryptography.fernet import Fernet
 import bot
-from jb_manager_bot import FSMOutput, AbstractFSM
+from jb_manager_bot import AbstractFSM
+from jb_manager_bot.data_models import FSMOutput
 
 
 def decrypt_credentials(credentials: dict) -> dict:
@@ -16,17 +17,14 @@ def decrypt_credentials(credentials: dict) -> dict:
 
 
 def callback_function(fsm_output: FSMOutput):
-    output = json.loads(fsm_output.model_dump_json())
-    output["header"] = output["message_data"]["header"]
-    output["footer"] = output["message_data"]["footer"]
-    output["text"] = output["message_data"]["body"]
-    output.pop("message_data")
-    print(json.dumps({"callback_message": output}))
+    output = json.loads(fsm_output.model_dump_json(exclude_none=True))
+    print(json.dumps({"fsm_output": output}))
 
 
 runner_input = json.loads(sys.argv[1])
-message_text = runner_input.get("message_text")
-callback_input = runner_input.get("callback_input")
+fsm_input = runner_input.get("fsm_input")
+message_text = fsm_input.get("user_input")
+callback_input = fsm_input.get("callback_input")
 fsm_state_dict = runner_input.get("state")
 bot_name = runner_input.get("bot_name")
 credentials = runner_input.get("credentials")
